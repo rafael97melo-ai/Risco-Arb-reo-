@@ -1,0 +1,892 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1D4D2E">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Risco Arbóreo">
+<title>Risco Arbóreo · Município × TRAQ</title>
+<!--
+  ============================================================================
+  RISCO ARBÓREO — Coleta pareada Município (Lei 776/2010 · NBR 16246-3) × TRAQ-ISA
+  PIBIC FCA/UNESP Botucatu
+  ----------------------------------------------------------------------------
+  • Arquivo único, sem dependências externas: CSS e JS embutidos.
+    (O CSS segue a lógica utilitária do Tailwind, mas foi escrito à mão para
+    não depender do CDN — o Tailwind via CDN exige internet no carregamento.)
+  • Dados em localStorage (chave traq.records.v1). Faça backup JSON com frequência.
+  • Exportação CSV com as 49 colunas da aba "Coleta" da Planilha-Mestre, na
+    mesma ordem, + coluna extra "Precisão GPS (m)".
+  • Matrizes TRAQ idênticas à aba "Matrizes" da planilha (Dunster et al., 2013).
+  • O nível municipal NÃO é calculado: é atribuído pelo avaliador conforme a
+    rubrica de pareamento ordinal (o método municipal não possui matriz).
+  ============================================================================
+-->
+<style>
+  /* ---------- Tokens ---------- */
+  :root{
+    --paper:#FFFFFF; --ink:#102017; --muted:#394A3F; --soft:#E9EFEA;
+    --forest:#1D4D2E; --mun:#23408E; --vis:#FFD400;
+    --r1:#1B7F3B; --r2:#F2C200; --r3:#E0600F; --r4:#B71C1C;
+    --nav-h:68px; --bar-h:78px;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0;font:18px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+       color:var(--ink);background:var(--soft);
+       padding-bottom:calc(var(--nav-h) + var(--bar-h) + 24px + env(safe-area-inset-bottom))}
+  body.no-bar{padding-bottom:calc(var(--nav-h) + 24px + env(safe-area-inset-bottom))}
+  button,input,textarea,select{font:inherit;color:inherit}
+  [hidden]{display:none!important}
+  .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+  /* ---------- Cabeçalho ---------- */
+  header.top{position:sticky;top:0;z-index:30;background:var(--forest);color:#fff;
+    display:flex;align-items:center;justify-content:space-between;gap:12px;
+    padding:10px 16px;padding-top:calc(10px + env(safe-area-inset-top))}
+  .brand{display:flex;align-items:center;gap:10px;line-height:1.1}
+  .brand strong{font-size:1.15rem;display:block}
+  .brand small{font-size:.85rem;opacity:.9}
+  .count{background:#fff;color:var(--forest);font-weight:800;border-radius:999px;padding:4px 12px;font-size:.95rem;white-space:nowrap}
+
+  main{max-width:720px;margin:0 auto;padding:12px}
+  @media (max-width:400px){ main{padding:10px 8px} }
+  .tab{display:none}
+  .tab.active{display:block}
+
+  /* ---------- Cartões / seções do formulário ---------- */
+  .card{background:var(--paper);border:2px solid var(--ink);border-radius:14px;padding:14px 14px 16px;margin:0 0 14px;min-width:0}
+  .card legend{float:left;width:100%;padding:0;margin:0 0 4px;font-size:1.2rem;font-weight:800;display:flex;align-items:center;gap:10px}
+  .card legend + *{clear:both}
+  .step{display:inline-grid;place-items:center;flex:none;width:36px;height:36px;border-radius:50%;background:var(--ink);color:#fff;font-size:1rem}
+  .card.mun{border-left:12px solid var(--mun)}
+  .card.mun .step{background:var(--mun)}
+  .card.traq{border-left:12px solid var(--forest)}
+  .card.traq .step{background:var(--forest)}
+  .source{display:block;font-size:.9rem;font-weight:600;color:var(--muted);margin:0 0 4px}
+  .hint{font-size:.95rem;color:var(--muted);margin:6px 0 0}
+  .lbl{display:block;font-weight:800;margin:16px 0 6px}
+  .sub{font-size:1.05rem;font-weight:800;margin:22px 0 0;padding-top:14px;border-top:2px dashed #9AAA9F}
+
+  .in{width:100%;min-height:54px;font-size:1.1rem;padding:10px 12px;border:2px solid var(--ink);border-radius:10px;background:#fff}
+  textarea.in{min-height:88px;resize:vertical}
+  .in[readonly]{background:var(--soft);font-weight:700}
+  .in:focus,.btn:focus-visible,.nav button:focus-visible{outline:4px solid var(--vis);outline-offset:2px}
+  .row2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+  .row3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+  .row2 .lbl,.row3 .lbl{font-size:.95rem}
+
+  /* ---------- Seletores circulares grandes (radio) ---------- */
+  .opts{display:grid;gap:8px;grid-template-columns:repeat(2,minmax(0,1fr))}
+  .opts.c3{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .opts.c1{grid-template-columns:1fr}
+  @media (min-width:560px){ .opts.c4{grid-template-columns:repeat(4,minmax(0,1fr))} .opts.c5{grid-template-columns:repeat(3,minmax(0,1fr))} }
+  .opt,.chip{position:relative;cursor:pointer;-webkit-tap-highlight-color:transparent}
+  .opt input,.chip input{position:absolute;opacity:0;width:1px;height:1px}
+  .opt span{display:flex;align-items:center;gap:10px;min-height:58px;padding:8px 12px;
+    border:2px solid var(--ink);border-radius:12px;background:#fff;font-weight:700;line-height:1.15;overflow-wrap:break-word;hyphens:auto;-webkit-hyphens:auto}
+  .opt span::before{content:"";flex:none;width:24px;height:24px;border-radius:50%;border:3px solid currentColor;background:#fff}
+  @media (max-width:400px){
+    .card{padding:12px 10px 14px}
+    .card.mun,.card.traq{border-left-width:8px}
+    .opt span{gap:8px;padding:8px 9px;font-size:.97rem}
+    .opt span::before{width:20px;height:20px}
+  }
+  .opt input:checked + span{background:var(--forest);border-color:var(--forest);color:#fff}
+  .opt input:checked + span::before{border-color:#fff;background:radial-gradient(circle,#fff 0 40%,transparent 46%)}
+  .opt input:focus-visible + span{outline:4px solid var(--vis);outline-offset:2px}
+  /* Escala de risco: a cor do selecionado indica a gravidade */
+  .opt[data-l="1"] input:checked + span{background:var(--r1);border-color:var(--r1);color:#fff}
+  .opt[data-l="2"] input:checked + span{background:var(--r2);border-color:var(--ink);color:var(--ink)}
+  .opt[data-l="3"] input:checked + span{background:var(--r3);border-color:var(--ink);color:var(--ink)}
+  .opt[data-l="4"] input:checked + span{background:var(--r4);border-color:var(--r4);color:#fff}
+  .opt[data-l="2"] input:checked + span::before,.opt[data-l="3"] input:checked + span::before{border-color:var(--ink);background:radial-gradient(circle,var(--ink) 0 40%,transparent 46%)}
+
+  /* ---------- Chips de seleção múltipla ---------- */
+  .chips{display:flex;flex-wrap:wrap;gap:8px}
+  .chip span{display:inline-flex;align-items:center;min-height:50px;padding:8px 16px;border:2px solid var(--ink);border-radius:999px;background:#fff;font-weight:700}
+  .chip input:checked + span{background:var(--ink);color:#fff}
+  .chip input:checked + span::before{content:"✓";margin-right:6px}
+  .chip input:focus-visible + span{outline:4px solid var(--vis);outline-offset:2px}
+  .other{margin-top:8px}
+
+  /* ---------- Resultados intermediários ---------- */
+  .out{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px;padding:12px;border-radius:10px;border:2px dashed var(--ink);background:var(--soft);font-weight:700}
+  .out b{font-size:1.15rem}
+
+  /* ---------- Botões ---------- */
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;width:100%;min-height:58px;padding:12px 18px;
+    border:2px solid var(--ink);border-radius:12px;background:#fff;font-size:1.08rem;font-weight:800;cursor:pointer;text-decoration:none}
+  .btn:active{transform:translateY(1px)}
+  .btn-primary{background:var(--vis)}
+  .btn-dark{background:var(--forest);border-color:var(--forest);color:#fff}
+  .btn-danger{color:var(--r4);border-color:var(--r4)}
+  .btn-sm{min-height:50px;font-size:1rem;padding:8px 14px}
+  .actions{display:grid;gap:10px;margin:18px 0 8px}
+  .editbar{display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--vis);border:2px solid var(--ink);border-radius:12px;padding:10px 12px;margin-bottom:12px;font-weight:800}
+  .editbar .btn{width:auto}
+
+  /* ---------- Barra de resultado (fixa, aba Coleta) ---------- */
+  .resultbar{position:fixed;left:0;right:0;z-index:25;bottom:calc(var(--nav-h) + env(safe-area-inset-bottom));
+    background:#fff;border-top:3px solid var(--ink);padding:8px 10px;height:var(--bar-h)}
+  .rb-in{max-width:720px;margin:0 auto;height:100%;display:grid;grid-template-columns:1fr auto 1fr;gap:8px;align-items:stretch}
+  .tile{border:2px solid var(--ink);border-radius:10px;padding:4px 10px;background:#fff;display:flex;flex-direction:column;justify-content:center;min-width:0}
+  .tile small{font-size:.78rem;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .tile b{font-size:1.4rem;line-height:1.1}
+  .vs{display:flex;flex-direction:column;align-items:center;justify-content:center;font-weight:800;font-size:.78rem;text-align:center;line-height:1.1;max-width:92px}
+  .vs b{font-size:1.5rem}
+  .l1{background:var(--r1)!important;border-color:var(--r1)!important;color:#fff!important}
+  .l2{background:var(--r2)!important;color:var(--ink)!important}
+  .l3{background:var(--r3)!important;color:var(--ink)!important}
+  .l4{background:var(--r4)!important;border-color:var(--r4)!important;color:#fff!important}
+
+  /* ---------- Navegação inferior (alcance do polegar) ---------- */
+  nav.nav{position:fixed;left:0;right:0;bottom:0;z-index:30;background:var(--ink);
+    padding-bottom:env(safe-area-inset-bottom);display:grid;grid-template-columns:repeat(3,1fr)}
+  .nav button{height:var(--nav-h);border:0;background:transparent;color:#fff;font-weight:800;font-size:.92rem;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;cursor:pointer}
+  .nav button svg{width:26px;height:26px}
+  .nav button[aria-selected="true"]{background:var(--vis);color:var(--ink)}
+
+  /* ---------- Inventário ---------- */
+  .toolbar{display:grid;gap:10px;margin-bottom:14px}
+  .toolbar .pair{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .item{background:#fff;border:2px solid var(--ink);border-radius:12px;padding:12px;margin-bottom:10px}
+  .item-h{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
+  .item-h strong{font-size:1.15rem}
+  .item-h em{font-style:normal;color:var(--muted);font-size:.9rem;text-align:right}
+  .sp{font-style:italic;margin:2px 0 8px}
+  .pills{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}
+  .pill{border:2px solid var(--ink);border-radius:10px;padding:4px 10px;font-weight:800;background:#fff}
+  .pill small{display:block;font-size:.75rem}
+  .flag{font-size:.9rem;font-weight:700;margin:-2px 0 10px}
+  .item .pair{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .empty{background:#fff;border:2px dashed var(--ink);border-radius:12px;padding:22px;text-align:center}
+
+  /* ---------- Estatísticas ---------- */
+  .kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px}
+  .kpi{background:#fff;border:2px solid var(--ink);border-radius:12px;padding:10px;text-align:center}
+  .kpi b{display:block;font-size:1.6rem;line-height:1.1}
+  .kpi small{font-weight:700;font-size:.8rem}
+  .scroll{overflow-x:auto}
+  table.ct{border-collapse:collapse;width:100%;min-width:320px;background:#fff;font-size:.95rem}
+  .ct th,.ct td{border:2px solid var(--ink);padding:8px 4px;text-align:center}
+  .ct th{background:var(--soft)}
+  .ct td.diag{background:#CFE8D5;font-weight:800}
+  .ct td.zero{color:#8A968D}
+  .bars{display:grid;gap:6px}
+  .bar{display:grid;grid-template-columns:88px 1fr auto;align-items:center;gap:8px;font-weight:700;font-size:.95rem}
+  .bar i{display:block;height:26px;border:2px solid var(--ink);border-radius:6px;min-width:2px}
+  .note{font-size:.95rem;background:var(--soft);border-radius:10px;padding:10px 12px;margin-top:10px}
+
+  /* ---------- Toast ---------- */
+  #toast{position:fixed;left:50%;transform:translateX(-50%);top:calc(74px + env(safe-area-inset-top));z-index:40;
+    max-width:92vw;background:var(--ink);color:#fff;font-weight:700;padding:12px 16px;border-radius:12px;
+    border:3px solid var(--vis);display:none}
+  #toast.err{border-color:var(--r4);background:#fff;color:var(--r4)}
+  #toast.show{display:block}
+
+  @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="brand">
+    <svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true"><circle cx="17" cy="13" r="10" fill="#fff"/><rect x="15" y="18" width="4" height="12" fill="#fff"/><rect x="6" y="29" width="22" height="3" fill="#FFD400"/></svg>
+    <div><strong>Risco Arbóreo</strong><small>Município × TRAQ-ISA</small></div>
+  </div>
+  <span class="count" id="hdrCount">0 árvores</span>
+</header>
+
+<main>
+  <!-- ================= ABA 1: NOVA COLETA ================= -->
+  <section id="tab-coleta" class="tab active" aria-labelledby="nav-coleta">
+    <div class="editbar" id="editBar" hidden>
+      <span>Editando árvore <span id="editLabel"></span></span>
+      <button type="button" class="btn btn-sm" id="btnCancelEdit">Cancelar</button>
+    </div>
+    <form id="f" autocomplete="off" novalidate></form>
+  </section>
+
+  <!-- ================= ABA 2: INVENTÁRIO ================= -->
+  <section id="tab-inv" class="tab" aria-labelledby="nav-inv">
+    <div class="toolbar">
+      <button type="button" class="btn btn-primary" id="btnCsv">⬇ Exportar inventário para CSV</button>
+      <div class="pair">
+        <button type="button" class="btn btn-sm" id="btnShare">Compartilhar CSV</button>
+        <button type="button" class="btn btn-sm" id="btnBackup">Backup JSON</button>
+      </div>
+      <button type="button" class="btn btn-sm" id="btnRestore">Restaurar backup</button>
+      <input type="file" id="fileRestore" accept="application/json,.json" hidden>
+      <label class="sr" for="search">Buscar</label>
+      <input class="in" id="search" type="search" placeholder="Buscar por ID, espécie ou praça">
+    </div>
+    <div id="invList"></div>
+  </section>
+
+  <!-- ================= ABA 3: ESTATÍSTICAS ================= -->
+  <section id="tab-stats" class="tab" aria-labelledby="nav-stats">
+    <div id="statsBody"></div>
+  </section>
+</main>
+
+<!-- Barra fixa de resultado em tempo real -->
+<div class="resultbar" id="resultBar" aria-live="polite">
+  <div class="rb-in">
+    <div class="tile" id="tMun"><small>Município</small><b id="vMun">—</b></div>
+    <div class="vs" id="vConc"><b>·</b>aguardando</div>
+    <div class="tile" id="tTraq"><small>TRAQ</small><b id="vTraq">—</b></div>
+  </div>
+</div>
+
+<nav class="nav" role="tablist" aria-label="Seções do aplicativo">
+  <button id="nav-coleta" role="tab" aria-selected="true" data-tab="coleta">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Nova coleta</button>
+  <button id="nav-inv" role="tab" aria-selected="false" data-tab="inv">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>Inventário</button>
+  <button id="nav-stats" role="tab" aria-selected="false" data-tab="stats">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><path d="M5 20V10M12 20V4M19 20v-7"/></svg>Comparativo</button>
+</nav>
+
+<div id="toast" role="status" aria-live="polite"></div>
+<datalist id="dlEspecies"></datalist>
+<datalist id="dlLocais"></datalist>
+<datalist id="dlPoda">
+  <option value="Limpeza"><option value="Levantamento de copa"><option value="Adequação (rede elétrica)">
+  <option value="Redução de copa"><option value="Correção/formação"><option value="Emergência">
+</datalist>
+
+<script>
+'use strict';
+/* =============================================================================
+   1. VOCABULÁRIO CONTROLADO — idêntico à aba "Listas" da Planilha-Mestre
+   ========================================================================== */
+const L = {
+  vitalidade:   ['Boa','Regular','Ruim','Morta'],
+  gravidade:    ['Leve','Moderada','Severa'],
+  intervencao:  ['Nenhuma','Monitoramento','Poda','Tratamento fitossanitário','Remoção'],
+  nivelMun:     ['Baixo','Médio','Alto','Extremo'],
+  simNao:       ['Sim','Não'],
+  periodo:      ['6 meses','1 ano','3 anos','5 anos'],
+  exposicao:    ['Protegida','Parcial','Exposta'],
+  ocupacao:     ['Raro','Ocasional','Frequente','Constante'],
+  probFalha:    ['Improvável','Possível','Provável','Iminente'],
+  probImpacto:  ['Muito baixa','Baixa','Média','Alta'],
+  combinada:    ['Improvável','Pouco provável','Provável','Muito provável'],
+  consequencia: ['Insignificante','Menor','Significativa','Severa'],
+  categoria:    ['Baixo','Moderado','Alto','Extremo'],
+  alarp:        ['Aceitável (ALARP)','Requer nova ação'],
+};
+
+/* Listas de seleção rápida (chips). Podem ser editadas livremente. */
+const CHIPS = {
+  alvos:     ['Calçada','Via pública','Fiação elétrica','Imóvel','Área verde','Mobiliário urbano','Veículos estacionados','Ponto de ônibus'],
+  conflitos: ['Fiação elétrica','Calçada','Iluminação pública','Sinalização','Muro/edificação','Rede subterrânea','Nenhum'],
+  fitossan:  ['Cupins','Brocas','Fungos (corpos de frutificação)','Erva-de-passarinho','Formigas','Nenhuma'],
+  defRaizes: ['Raízes cortadas','Raízes expostas','Raiz estranguladora','Levantamento do solo','Podridão no colo','Cavidade na base','Aterro sobre o colo'],
+  defTronco: ['Cavidade','Rachadura','Madeira deteriorada','Inclinação acentuada','Codominância','Casca inclusa','Cancro','Ferimento/anelamento'],
+  defCopa:   ['Galhos mortos','Galho pendurado','Rachadura em galho','Codominância','Casca inclusa','Copa desequilibrada','Sobrepeso de galhos','Poda drástica anterior'],
+};
+
+/* Espécies frequentes na arborização do interior paulista (sugestões) */
+const ESPECIES = [
+  'Sibipiruna (Cenostigma pluviosum)','Tipuana (Tipuana tipu)','Oiti (Moquilea tomentosa)',
+  'Ipê-roxo (Handroanthus impetiginosus)','Ipê-amarelo (Handroanthus chrysotrichus)','Ipê-branco (Tabebuia roseoalba)',
+  'Ipê-rosa (Tabebuia rosea)','Jacarandá-mimoso (Jacaranda mimosifolia)','Flamboyant (Delonix regia)',
+  'Figueira-benjamina (Ficus benjamina)','Figueira-lacerdinha (Ficus microcarpa)','Alfeneiro (Ligustrum lucidum)',
+  'Mangueira (Mangifera indica)','Pata-de-vaca (Bauhinia variegata)','Quaresmeira (Pleroma granulosum)',
+  'Resedá (Lagerstroemia indica)','Palmeira-imperial (Roystonea oleracea)','Chapéu-de-sol (Terminalia catappa)',
+  'Jerivá (Syagrus romanzoffiana)','Aroeira-salsa (Schinus molle)','Pau-ferro (Libidibia ferrea)',
+  'Chuva-de-ouro (Cassia fistula)','Espatódea (Spathodea campanulata)','Tamboril (Enterolobium contortisiliquum)',
+  'Pau-brasil (Paubrasilia echinata)','Magnólia-amarela (Magnolia champaca)','Eucalipto (Eucalyptus sp.)',
+];
+
+/* =============================================================================
+   2. MATRIZES TRAQ-ISA (Dunster et al., 2013) — iguais à aba "Matrizes"
+   ========================================================================== */
+// Matriz 1: Prob. de falha (linha) × Prob. de impacto (coluna: Muito baixa → Alta)
+const M1 = {
+  'Iminente':   ['Improvável','Pouco provável','Provável','Muito provável'],
+  'Provável':   ['Improvável','Improvável','Pouco provável','Provável'],
+  'Possível':   ['Improvável','Improvável','Improvável','Pouco provável'],
+  'Improvável': ['Improvável','Improvável','Improvável','Improvável'],
+};
+// Matriz 2: Prob. combinada (linha) × Consequência (coluna: Insignificante → Severa)
+const M2 = {
+  'Muito provável': ['Baixo','Moderado','Alto','Extremo'],
+  'Provável':       ['Baixo','Moderado','Alto','Alto'],
+  'Pouco provável': ['Baixo','Baixo','Moderado','Moderado'],
+  'Improvável':     ['Baixo','Baixo','Baixo','Baixo'],
+};
+
+/** Calcula os campos automáticos (colunas cinza da planilha). */
+function compute(r){
+  const munCode = L.nivelMun.indexOf(r.nivelMun) + 1 || '';
+  const pi = L.probImpacto.indexOf(r.probImpacto);
+  const m1 = (M1[r.probFalha] && pi >= 0) ? M1[r.probFalha][pi] : '';
+  const ci = L.consequencia.indexOf(r.consequencia);
+  const m2 = (m1 && ci >= 0) ? M2[m1][ci] : '';
+  const traqCode = L.categoria.indexOf(m2) + 1 || '';
+  const diff = (munCode && traqCode) ? traqCode - munCode : '';
+  const conc = diff === '' ? '' : diff === 0 ? 'Concordante' : diff > 0 ? 'Município subestima' : 'Município superestima';
+  return { munCode, m1, m2, traqCode, diff, conc };
+}
+
+/* =============================================================================
+   3. CONSTRUÇÃO DO FORMULÁRIO
+   ========================================================================== */
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+/** Grupo de radio buttons grandes. lv = níveis de cor (1–4) por opção, para escalas de risco. */
+function radios(name, label, opts, { cls = '', lv = null } = {}){
+  const id = 'g_' + name;
+  return `<span class="lbl" id="${id}">${label}</span>
+  <div class="opts ${cls}" role="radiogroup" aria-labelledby="${id}">` +
+    opts.map((o, i) => `<label class="opt"${lv ? ` data-l="${lv[i]}"` : ''}><input type="radio" name="${name}" value="${esc(o)}"><span>${esc(o)}</span></label>`).join('') +
+  `</div>`;
+}
+/** Chips de seleção múltipla, com campo opcional "outro". */
+function chips(name, label, opts, other = true){
+  return `<span class="lbl">${label}</span><div class="chips">` +
+    opts.map(o => `<label class="chip"><input type="checkbox" name="${name}" value="${esc(o)}"><span>${esc(o)}</span></label>`).join('') +
+    `</div>` + (other ? `<input class="in other" name="${name}_outro" placeholder="Outro (opcional)" aria-label="${label}: outro">` : '');
+}
+const field = (label, html, id) => `<label class="lbl" for="${id}">${label}</label>${html}`;
+const card = (n, title, inner, cls = '', source = '') =>
+  `<fieldset class="card ${cls}"><legend><span class="step">${n}</span>${title}</legend>${source ? `<span class="source">${source}</span>` : ''}${inner}</fieldset>`;
+
+const LV4 = [1,2,3,4], LV3 = [1,2,4];
+
+document.getElementById('f').innerHTML = `
+${card(1, 'Identificação', `
+  <div class="row2">
+    ${field('ID / Plaqueta', '<input class="in" id="fId" name="id" inputmode="numeric" required>', 'fId')}
+    ${field('Data e hora', '<input class="in" id="dataView" readonly tabindex="-1">', 'dataView')}
+  </div>
+  <input type="hidden" name="criado">
+  ${field('Praça / Local', '<input class="in" id="fLocal" name="local" list="dlLocais" placeholder="Nome da praça">', 'fLocal')}
+  ${field('Avaliador(a)', '<input class="in" id="fAval" name="avaliador">', 'fAval')}
+`)}
+
+${card(2, 'Localização', `
+  <p class="hint" style="margin-top:0">Fique junto ao tronco e aguarde a precisão estabilizar.</p>
+  <button type="button" class="btn btn-dark" id="btnGps" style="margin-top:8px">Capturar coordenadas GPS</button>
+  <p class="hint" id="gpsMsg" aria-live="polite">Sem sinal? Digite em graus decimais (ex.: -22.88541).</p>
+  <div class="row2">
+    ${field('Latitude', '<input class="in" id="fLat" name="lat" placeholder="-22.88">', 'fLat')}
+    ${field('Longitude', '<input class="in" id="fLon" name="lon" placeholder="-48.44">', 'fLon')}
+  </div>
+  <input type="hidden" name="gpsAcc">
+`)}
+
+${card(3, 'Dendrometria', `
+  ${field('Espécie', '<input class="in" id="fEsp" name="especie" list="dlEspecies" placeholder="Comece a digitar">', 'fEsp')}
+  <div class="row3">
+    ${field('DAP (cm)', '<input class="in" id="fDap" name="dap" inputmode="decimal">', 'fDap')}
+    ${field('Altura (m)', '<input class="in" id="fAlt" name="altura" inputmode="decimal">', 'fAlt')}
+    ${field('Copa (m)', '<input class="in" id="fCopa" name="copa" inputmode="decimal">', 'fCopa')}
+  </div>
+  ${field('Nº da foto', '<input class="in" id="fFoto" name="foto" inputmode="numeric">', 'fFoto')}
+`)}
+
+${card(4, 'Entorno e alvos', `
+  ${chips('alvos', 'Alvos presentes', CHIPS.alvos)}
+  ${chips('conflitos', 'Conflitos com infraestrutura', CHIPS.conflitos)}
+`)}
+
+${card(5, 'Inspeção 360°', `
+  <p class="hint" style="margin-top:0">Registre o que observou antes de classificar. Estes campos alimentam as duas metodologias.</p>
+  ${radios('vitalidade', 'Vitalidade', L.vitalidade, { cls: 'c4', lv: LV4 })}
+  ${chips('fitossan', 'Ocorrências fitossanitárias', CHIPS.fitossan)}
+  ${chips('defRaizes', 'Raízes e colo', CHIPS.defRaizes)}
+  ${chips('defTronco', 'Tronco', CHIPS.defTronco)}
+  ${chips('defCopa', 'Copa e galhos', CHIPS.defCopa)}
+`)}
+
+${card(6, 'Método municipal', `
+  ${radios('grRaizes', 'Gravidade — raízes/base', L.gravidade, { cls: 'c3', lv: LV3 })}
+  ${radios('grTronco', 'Gravidade — tronco', L.gravidade, { cls: 'c3', lv: LV3 })}
+  ${radios('grCopa', 'Gravidade — copa', L.gravidade, { cls: 'c3', lv: LV3 })}
+  ${radios('intervencao', 'Intervenção recomendada', L.intervencao, { cls: 'c5' })}
+  ${field('Tipo de poda', '<input class="in" id="fPoda" name="tipoPoda" list="dlPoda">', 'fPoda')}
+  ${field('Justificativa', '<textarea class="in" id="fJust" name="justificativa"></textarea>', 'fJust')}
+  ${radios('iminente', 'Risco iminente de queda?', L.simNao)}
+  ${radios('nivelMun', 'Nível de risco (pareamento ordinal)', L.nivelMun, { cls: 'c4', lv: LV4 })}
+  <p class="hint">Converta a recomendação de manejo no nível equivalente, conforme a rubrica de pareamento do projeto.</p>
+`, 'mun', 'Lei 776/2010 e ABNT NBR 16246-3')}
+
+${card(7, 'TRAQ-ISA', `
+  ${radios('periodo', 'Período de avaliação', L.periodo, { cls: 'c4' })}
+  <div class="row2">
+    <div>${radios('colo', 'Colo visível?', L.simNao)}</div>
+    <div>${radios('historico', 'Histórico de falhas?', L.simNao)}</div>
+  </div>
+  ${radios('exposicao', 'Exposição ao vento', L.exposicao, { cls: 'c3' })}
+
+  <p class="sub">Alvo</p>
+  ${field('Descrição do alvo', '<input class="in" id="fAlvo" name="traqAlvo" placeholder="Preenchido a partir dos alvos marcados">', 'fAlvo')}
+  ${radios('ocupacao', 'Taxa de ocupação', L.ocupacao, { cls: 'c4', lv: LV4 })}
+  ${field('Proteção do alvo', '<input class="in" id="fProt" name="protecao" placeholder="Ex.: nenhuma, abrigo, cobertura">', 'fProt')}
+
+  <p class="sub">Categorização do risco</p>
+  ${radios('probFalha', 'Probabilidade de falha', L.probFalha, { cls: 'c4', lv: LV4 })}
+  ${radios('probImpacto', 'Probabilidade de impactar o alvo', L.probImpacto, { cls: 'c4', lv: LV4 })}
+  <div class="out"><span>Falha e impacto (Matriz 1)</span><b id="oM1">—</b></div>
+  ${radios('consequencia', 'Consequências da falha', L.consequencia, { cls: 'c4', lv: LV4 })}
+  <div class="out" id="oM2box"><span>Categoria de risco (Matriz 2)</span><b id="oM2">—</b></div>
+
+  <p class="sub">Mitigação</p>
+  ${field('Opções de mitigação', '<textarea class="in" id="fMit" name="mitigacao"></textarea>', 'fMit')}
+  ${radios('residual', 'Risco residual', L.categoria, { cls: 'c4', lv: LV4 })}
+  ${radios('alarp', 'Situação ALARP', L.alarp, { cls: 'c1' })}
+`, 'traq', 'Dunster et al., 2013')}
+
+<div class="actions">
+  <button type="submit" class="btn btn-primary" id="btnSave">Salvar árvore</button>
+  <button type="button" class="btn" id="btnClear">Limpar formulário</button>
+</div>`;
+
+/* =============================================================================
+   4. ESTADO E PERSISTÊNCIA (localStorage)
+   ========================================================================== */
+const KEY = { recs:'traq.records.v1', draft:'traq.draft.v1', sticky:'traq.sticky.v1' };
+const TEXT  = ['id','criado','local','avaliador','lat','lon','gpsAcc','especie','dap','altura','copa','foto','tipoPoda','justificativa','traqAlvo','protecao','mitigacao'];
+const RADIO = ['vitalidade','grRaizes','grTronco','grCopa','intervencao','iminente','nivelMun','periodo','colo','historico','exposicao','ocupacao','probFalha','probImpacto','consequencia','residual','alarp'];
+const MULTI = ['alvos','conflitos','fitossan','defRaizes','defTronco','defCopa'];
+
+const form = document.getElementById('f');
+const $ = id => document.getElementById(id);
+let records = readLS(KEY.recs, []);
+let editingUid = null;
+
+function readLS(k, fallback){ try { return JSON.parse(localStorage.getItem(k)) ?? fallback; } catch { return fallback; } }
+function writeLS(k, v){
+  try { localStorage.setItem(k, JSON.stringify(v)); return true; }
+  catch { toast('Não foi possível gravar no aparelho. Exporte um backup agora.', true); return false; }
+}
+const persist = () => writeLS(KEY.recs, records);
+
+/** Lê o formulário para um objeto-registro. */
+function readForm(){
+  const fd = new FormData(form), r = {};
+  TEXT.forEach(k => r[k] = String(fd.get(k) ?? '').trim());
+  RADIO.forEach(k => r[k] = fd.get(k) || '');
+  MULTI.forEach(k => { r[k] = fd.getAll(k); r[k + '_outro'] = String(fd.get(k + '_outro') ?? '').trim(); });
+  ['lat','lon','dap','altura','copa'].forEach(k => r[k] = r[k].replace(',', '.'));
+  return r;
+}
+/** Preenche o formulário a partir de um registro. */
+function writeForm(r){
+  form.reset();
+  TEXT.forEach(k => { if (form.elements[k]) form.elements[k].value = r[k] ?? ''; });
+  RADIO.forEach(k => form.querySelectorAll(`[name="${k}"]`).forEach(i => i.checked = i.value === r[k]));
+  MULTI.forEach(k => {
+    form.querySelectorAll(`[name="${k}"]`).forEach(i => i.checked = (r[k] || []).includes(i.value));
+    if (form.elements[k + '_outro']) form.elements[k + '_outro'].value = r[k + '_outro'] ?? '';
+  });
+  $('dataView').value = fmtDate(r.criado);
+}
+
+const joinMulti = (r, k) => [...(r[k] || []), r[k + '_outro']].filter(Boolean).join('; ');
+function fmtDate(iso){
+  if (!iso) return '';
+  const d = new Date(iso), p = n => String(n).padStart(2, '0');
+  return `${p(d.getDate())}/${p(d.getMonth()+1)}/${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+function nextId(){
+  const nums = records.map(r => parseInt(r.id, 10)).filter(Number.isFinite);
+  return String(nums.length ? Math.max(...nums) + 1 : 1);
+}
+
+/* =============================================================================
+   5. FORMULÁRIO: NOVO, RASCUNHO, CÁLCULO AO VIVO, SALVAR
+   ========================================================================== */
+function newForm(){
+  editingUid = null; alvoAuto = true;
+  const sticky = readLS(KEY.sticky, {});
+  writeForm({ id: nextId(), criado: new Date().toISOString(), local: sticky.local || '', avaliador: sticky.avaliador || '', periodo: sticky.periodo || '' });
+  $('editBar').hidden = true;
+  $('gpsMsg').textContent = 'Sem sinal? Digite em graus decimais (ex.: -22.88541).';
+  localStorage.removeItem(KEY.draft);
+  updateLive();
+}
+
+function setTile(tile, valEl, text, level){
+  valEl.textContent = text || '—';
+  tile.classList.remove('l1','l2','l3','l4');
+  if (level) tile.classList.add('l' + level);
+}
+/** Atualiza Matriz 1, Matriz 2 e a barra comparativa em tempo real. */
+function updateLive(){
+  const r = readForm(), c = compute(r);
+  $('oM1').textContent = c.m1 || '—';
+  setTile($('oM2box'), $('oM2'), c.m2, c.traqCode);
+  setTile($('tMun'), $('vMun'), r.nivelMun, c.munCode);
+  setTile($('tTraq'), $('vTraq'), c.m2, c.traqCode);
+  const vs = $('vConc');
+  if (c.conc === 'Concordante') vs.innerHTML = '<b>=</b>concordam';
+  else if (c.diff > 0) vs.innerHTML = `<b>▲${c.diff}</b>município subestima`;
+  else if (c.diff < 0) vs.innerHTML = `<b>▼${-c.diff}</b>município superestima`;
+  else vs.innerHTML = '<b>·</b>aguardando';
+}
+
+let draftTimer;
+function saveDraft(){
+  clearTimeout(draftTimer);
+  draftTimer = setTimeout(() => writeLS(KEY.draft, { rec: readForm(), editingUid }), 400);
+}
+
+/* Preenche a descrição do alvo TRAQ com os alvos marcados, se ainda vazia/automática */
+let alvoAuto = true;
+function syncAlvo(){
+  const el = form.elements.traqAlvo;
+  if (alvoAuto || !el.value) { el.value = joinMulti(readForm(), 'alvos'); alvoAuto = true; }
+}
+form.elements.traqAlvo.addEventListener('input', () => alvoAuto = !form.elements.traqAlvo.value);
+
+form.addEventListener('input', e => { if (e.target.name === 'alvos' || e.target.name === 'alvos_outro') syncAlvo(); updateLive(); saveDraft(); });
+form.addEventListener('change', e => { if (e.target.name === 'alvos') syncAlvo(); updateLive(); saveDraft(); });
+
+/* Toque novamente numa opção marcada para desmarcá-la (correção rápida em campo) */
+form.addEventListener('pointerdown', e => {
+  const lab = e.target.closest('label.opt'); if (!lab) return;
+  const inp = lab.querySelector('input'); inp.dataset.was = inp.checked ? '1' : '';
+});
+form.addEventListener('click', e => {
+  const inp = e.target;
+  if (inp.type === 'radio' && inp.dataset.was === '1') { inp.checked = false; inp.dataset.was = ''; updateLive(); saveDraft(); }
+});
+
+form.addEventListener('submit', e => {
+  e.preventDefault();
+  const r = readForm();
+  if (!r.id) { toast('Informe o ID / plaqueta da árvore.', true); $('fId').focus(); return; }
+  for (const [k, nome] of [['dap','DAP'],['altura','Altura'],['copa','Copa'],['lat','Latitude'],['lon','Longitude']]) {
+    if (r[k] && isNaN(Number(r[k]))) { toast(`${nome} precisa ser um número.`, true); form.elements[k].focus(); return; }
+  }
+  const dup = records.find(x => x.id === r.id && x.uid !== editingUid);
+  if (dup && !confirm(`Já existe uma árvore com ID ${r.id}. Salvar mesmo assim?`)) return;
+
+  if (editingUid) {
+    const i = records.findIndex(x => x.uid === editingUid);
+    records[i] = { ...records[i], ...r, uid: editingUid, atualizado: new Date().toISOString() };
+  } else {
+    records.push({ ...r, uid: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), criado: r.criado || new Date().toISOString() });
+  }
+  if (!persist()) return;
+  writeLS(KEY.sticky, { local: r.local, avaliador: r.avaliador, periodo: r.periodo });
+
+  const c = compute(r), pend = [];
+  if (!r.nivelMun) pend.push('nível municipal');
+  if (!c.m2) pend.push('categoria TRAQ');
+  toast(pend.length ? `Árvore ${r.id} salva. Pendente: ${pend.join(' e ')}.` : `Árvore ${r.id} salva.`, pend.length > 0);
+  refreshMeta(); newForm(); window.scrollTo({ top: 0 });
+});
+
+$('btnClear').addEventListener('click', () => { if (confirm('Limpar todos os campos desta coleta?')) newForm(); });
+$('btnCancelEdit').addEventListener('click', () => { newForm(); toast('Edição cancelada.'); });
+
+/* =============================================================================
+   6. GPS — acompanha a posição por até 15 s e guarda a leitura mais precisa
+   ========================================================================== */
+$('btnGps').addEventListener('click', () => {
+  const msg = $('gpsMsg'), btn = $('btnGps');
+  if (!('geolocation' in navigator)) { msg.textContent = 'Este navegador não oferece GPS. Digite as coordenadas.'; return; }
+  if (!window.isSecureContext) { msg.textContent = 'O GPS só funciona com o app aberto por https. Digite as coordenadas.'; return; }
+  let best = null, done = false, watchId, timer;
+  btn.disabled = true; btn.textContent = 'Buscando sinal…';
+  const finish = err => {
+    if (done) return; done = true;
+    navigator.geolocation.clearWatch(watchId); clearTimeout(timer);
+    btn.disabled = false; btn.textContent = 'Capturar coordenadas GPS';
+    if (best) {
+      form.elements.lat.value = best.coords.latitude.toFixed(6);
+      form.elements.lon.value = best.coords.longitude.toFixed(6);
+      form.elements.gpsAcc.value = Math.round(best.coords.accuracy);
+      msg.textContent = `Coordenadas registradas com precisão de ±${Math.round(best.coords.accuracy)} m.`;
+      saveDraft();
+    } else {
+      msg.textContent = ({
+        1: 'Permissão de localização negada. Libere nas configurações do navegador ou digite as coordenadas.',
+        2: 'Posição indisponível. Vá para céu aberto ou digite as coordenadas.',
+        3: 'O GPS não respondeu a tempo. Tente de novo ou digite as coordenadas.',
+      })[err?.code] || 'Não foi possível obter a posição. Digite as coordenadas.';
+    }
+  };
+  watchId = navigator.geolocation.watchPosition(p => {
+    if (!best || p.coords.accuracy < best.coords.accuracy) best = p;
+    msg.textContent = `Precisão atual: ±${Math.round(p.coords.accuracy)} m…`;
+    if (p.coords.accuracy <= 5) finish();
+  }, err => finish(err), { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 });
+  timer = setTimeout(() => finish({ code: 3 }), 15000);
+});
+
+/* =============================================================================
+   7. INVENTÁRIO: LISTA, EDITAR, EXCLUIR
+   ========================================================================== */
+const pill = (label, text, lvl) => `<div class="pill${lvl ? ' l' + lvl : ''}"><small>${label}</small>${esc(text || '—')}</div>`;
+
+function renderInv(){
+  const q = $('search').value.trim().toLowerCase();
+  const list = records
+    .filter(r => !q || [r.id, r.especie, r.local].some(v => (v || '').toLowerCase().includes(q)))
+    .sort((a, b) => String(a.id).localeCompare(String(b.id), 'pt-BR', { numeric: true }));
+  if (!records.length) {
+    $('invList').innerHTML = `<div class="empty"><p><strong>Nenhuma árvore salva ainda.</strong></p><p>Vá em Nova coleta para registrar a primeira.</p></div>`;
+    return;
+  }
+  if (!list.length) { $('invList').innerHTML = `<div class="empty">Nenhum resultado para “${esc(q)}”.</div>`; return; }
+  $('invList').innerHTML = list.map(r => {
+    const c = compute(r);
+    const flag = c.conc ? (c.conc === 'Concordante' ? '= Concordante' : (c.diff > 0 ? '▲ ' : '▼ ') + c.conc) : 'Classificação incompleta';
+    return `<article class="item">
+      <div class="item-h"><strong>Árvore ${esc(r.id)}</strong><em>${esc(r.local)}<br>${fmtDate(r.criado)}</em></div>
+      <p class="sp">${esc(r.especie || 'Espécie não informada')}${r.dap ? ` — DAP ${esc(r.dap)} cm` : ''}</p>
+      <div class="pills">${pill('Município', r.nivelMun, c.munCode)}${pill('TRAQ', c.m2, c.traqCode)}</div>
+      <p class="flag">${flag}</p>
+      <div class="pair">
+        <button type="button" class="btn btn-sm" data-act="edit" data-uid="${r.uid}">Editar registro</button>
+        <button type="button" class="btn btn-sm btn-danger" data-act="del" data-uid="${r.uid}">Excluir registro</button>
+      </div></article>`;
+  }).join('');
+}
+$('search').addEventListener('input', renderInv);
+$('invList').addEventListener('click', e => {
+  const b = e.target.closest('button[data-act]'); if (!b) return;
+  const r = records.find(x => x.uid === b.dataset.uid); if (!r) return;
+  if (b.dataset.act === 'edit') {
+    writeForm(r); editingUid = r.uid; alvoAuto = false;
+    $('editBar').hidden = false; $('editLabel').textContent = r.id;
+    updateLive(); showTab('coleta'); window.scrollTo({ top: 0 });
+  } else if (confirm(`Excluir a árvore ${r.id}? Esta ação não pode ser desfeita.`)) {
+    records = records.filter(x => x.uid !== r.uid); persist();
+    if (editingUid === r.uid) newForm();
+    refreshMeta(); renderInv(); toast(`Árvore ${r.id} excluída.`);
+  }
+});
+
+/* =============================================================================
+   8. EXPORTAÇÃO CSV — mesmas colunas e ordem da aba "Coleta" da Planilha-Mestre
+   Formato: UTF-8 com BOM, separador ";" e vírgula decimal (Excel pt-BR).
+   No QGIS: Camada de texto delimitado → marque "Separador decimal é vírgula".
+   ========================================================================== */
+const n = v => (v === '' || v == null) ? '' : String(v).replace('.', ',');
+const COLS = [
+  ['ID / Plaqueta', r => r.id], ['Data', r => fmtDate(r.criado)], ['Praça / Local', r => r.local],
+  ['Avaliador(a)', r => r.avaliador], ['Latitude', r => n(r.lat)], ['Longitude', r => n(r.lon)],
+  ['Espécie', r => r.especie], ['DAP (cm)', r => n(r.dap)], ['Altura (m)', r => n(r.altura)],
+  ['Diâm. copa (m)', r => n(r.copa)], ['Nº foto', r => r.foto],
+  ['MUN · Vitalidade', r => r.vitalidade], ['MUN · Ocorrências fitossan.', r => joinMulti(r, 'fitossan')],
+  ['MUN · Raízes/base — defeitos', r => joinMulti(r, 'defRaizes')], ['MUN · Raízes — gravidade', r => r.grRaizes],
+  ['MUN · Tronco — defeitos', r => joinMulti(r, 'defTronco')], ['MUN · Tronco — gravidade', r => r.grTronco],
+  ['MUN · Copa — defeitos', r => joinMulti(r, 'defCopa')], ['MUN · Copa — gravidade', r => r.grCopa],
+  ['MUN · Alvos presentes', r => joinMulti(r, 'alvos')], ['MUN · Conflitos infraestrut.', r => joinMulti(r, 'conflitos')],
+  ['MUN · Intervenção', r => r.intervencao], ['MUN · Tipo de poda', r => r.tipoPoda], ['MUN · Justificativa', r => r.justificativa],
+  ['MUN · Nível de risco', r => r.nivelMun], ['MUN · Risco iminente?', r => r.iminente], ['MUN · Código', (r, c) => c.munCode],
+  ['TRAQ · Período aval.', r => r.periodo], ['TRAQ · Vitalidade', r => r.vitalidade], ['TRAQ · Colo visível?', r => r.colo],
+  ['TRAQ · Exposição vento', r => r.exposicao], ['TRAQ · Histórico falhas?', r => r.historico],
+  ['TRAQ · Raízes/colo — condições', r => joinMulti(r, 'defRaizes')], ['TRAQ · Tronco — condições', r => joinMulti(r, 'defTronco')],
+  ['TRAQ · Copa/galhos — condições', r => joinMulti(r, 'defCopa')], ['TRAQ · Descrição do alvo', r => r.traqAlvo],
+  ['TRAQ · Taxa de ocupação', r => r.ocupacao], ['TRAQ · Proteção do alvo', r => r.protecao],
+  ['TRAQ · Prob. de falha', r => r.probFalha], ['TRAQ · Prob. de impacto', r => r.probImpacto],
+  ['TRAQ · Prob. combinada (M1)', (r, c) => c.m1], ['TRAQ · Consequência', r => r.consequencia],
+  ['TRAQ · Categoria (M2)', (r, c) => c.m2], ['TRAQ · Código', (r, c) => c.traqCode],
+  ['TRAQ · Mitigação', r => r.mitigacao], ['TRAQ · Risco residual', r => r.residual], ['TRAQ · Situação ALARP', r => r.alarp],
+  ['Diferença (TRAQ − MUN)', (r, c) => c.diff], ['Concordância', (r, c) => c.conc],
+  ['Precisão GPS (m)', r => r.gpsAcc], // coluna extra (AX), fora da planilha original
+];
+const csvCell = v => { const s = String(v ?? ''); return /[;"\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+
+function buildCsv(){
+  const rows = [...records].sort((a, b) => String(a.id).localeCompare(String(b.id), 'pt-BR', { numeric: true }))
+    .map(r => { const c = compute(r); return COLS.map(([, get]) => csvCell(get(r, c))).join(';'); });
+  return '\uFEFF' + [COLS.map(([h]) => csvCell(h)).join(';'), ...rows].join('\r\n');
+}
+const csvName = () => `inventario_risco_${new Date().toISOString().slice(0, 10)}.csv`;
+
+function download(content, name, type){
+  const url = URL.createObjectURL(new Blob([content], { type }));
+  const a = Object.assign(document.createElement('a'), { href: url, download: name });
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+$('btnCsv').addEventListener('click', () => {
+  if (!records.length) { toast('Não há árvores para exportar.', true); return; }
+  download(buildCsv(), csvName(), 'text/csv;charset=utf-8');
+  toast(`${records.length} árvores exportadas.`);
+});
+$('btnShare').addEventListener('click', async () => {
+  if (!records.length) { toast('Não há árvores para compartilhar.', true); return; }
+  const file = new File([buildCsv()], csvName(), { type: 'text/csv' });
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try { await navigator.share({ files: [file], title: 'Inventário de risco arbóreo' }); } catch { /* cancelado */ }
+  } else { download(buildCsv(), csvName(), 'text/csv;charset=utf-8'); toast('Compartilhamento indisponível; o arquivo foi baixado.'); }
+});
+
+/* Backup/restauração completos em JSON (proteção contra limpeza do navegador) */
+$('btnBackup').addEventListener('click', () => {
+  download(JSON.stringify({ app: 'risco-arboreo', versao: 1, exportado: new Date().toISOString(), records }, null, 1),
+    `backup_risco_${new Date().toISOString().slice(0, 10)}.json`, 'application/json');
+  toast('Backup salvo.');
+});
+$('btnRestore').addEventListener('click', () => $('fileRestore').click());
+$('fileRestore').addEventListener('change', async e => {
+  const file = e.target.files[0]; e.target.value = ''; if (!file) return;
+  try {
+    const data = JSON.parse(await file.text());
+    const incoming = Array.isArray(data) ? data : data.records;
+    if (!Array.isArray(incoming)) throw new Error();
+    const have = new Set(records.map(r => r.uid));
+    const novos = incoming.filter(r => r && r.uid && !have.has(r.uid));
+    records.push(...novos); persist(); refreshMeta(); renderInv();
+    toast(`${novos.length} registros restaurados; ${incoming.length - novos.length} já existiam.`);
+  } catch { toast('Arquivo inválido. Use um backup JSON gerado por este app.', true); }
+});
+
+/* =============================================================================
+   9. ESTATÍSTICAS: contingência Município × TRAQ, concordância e Teste dos Sinais
+   ========================================================================== */
+/** p-valor bilateral exato do Teste dos Sinais (binomial, p = 0,5). */
+function signTest(pos, neg){
+  const N = pos + neg; if (!N) return null;
+  const k = Math.min(pos, neg);
+  const lf = x => { let s = 0; for (let i = 2; i <= x; i++) s += Math.log(i); return s; };
+  let p = 0;
+  for (let i = 0; i <= k; i++) p += Math.exp(lf(N) - lf(i) - lf(N - i) - N * Math.LN2);
+  return Math.min(1, 2 * p);
+}
+function bars(title, labels, counts){
+  const max = Math.max(1, ...counts);
+  return `<span class="lbl">${title}</span><div class="bars">` + labels.map((l, i) =>
+    `<div class="bar"><span>${l}</span><i class="l${i + 1}" style="width:${(counts[i] / max) * 100}%"></i><span>${counts[i]}</span></div>`).join('') + '</div>';
+}
+function renderStats(){
+  const rows = records.map(r => ({ r, c: compute(r) }));
+  const pares = rows.filter(x => x.c.munCode && x.c.traqCode);
+  const ct = [0,1,2,3].map(() => [0,0,0,0]);
+  pares.forEach(({ c }) => ct[c.munCode - 1][c.traqCode - 1]++);
+  const conc = pares.filter(x => x.c.diff === 0).length;
+  const sub = pares.filter(x => x.c.diff > 0).length, sup = pares.filter(x => x.c.diff < 0).length;
+  const p = signTest(sub, sup);
+  const pct = pares.length ? Math.round(conc / pares.length * 100) : 0;
+
+  const table = `<div class="scroll"><table class="ct"><caption class="sr">Matriz de contingência</caption>
+    <tr><th>Mun. ↓ / TRAQ →</th>${L.categoria.map(h => `<th>${h}</th>`).join('')}<th>Total</th></tr>
+    ${L.nivelMun.map((m, i) => `<tr><th>${m}</th>${ct[i].map((v, j) =>
+      `<td class="${i === j ? 'diag' : ''}${v ? '' : ' zero'}">${v}</td>`).join('')}<th>${ct[i].reduce((a, b) => a + b, 0)}</th></tr>`).join('')}
+    <tr><th>Total</th>${[0,1,2,3].map(j => `<th>${ct.reduce((a, row) => a + row[j], 0)}</th>`).join('')}<th>${pares.length}</th></tr>
+  </table></div>`;
+
+  let verdict = 'Colete árvores com as duas classificações para testar a tendência.';
+  if (p !== null) verdict = p < 0.05
+    ? `Diferença significativa (p = ${p.toFixed(4).replace('.', ',')}): o município tende a ${sub > sup ? 'subestimar' : 'superestimar'} o risco em relação ao TRAQ.`
+    : `Sem diferença significativa entre os métodos (p = ${p.toFixed(4).replace('.', ',')}).`;
+
+  // Classes de DAP (10 cm)
+  const daps = records.map(r => parseFloat(r.dap)).filter(Number.isFinite);
+  let dapHtml = '';
+  if (daps.length) {
+    const cls = {}; daps.forEach(d => { const k = Math.floor(d / 10) * 10; cls[k] = (cls[k] || 0) + 1; });
+    const keys = Object.keys(cls).map(Number).sort((a, b) => a - b), max = Math.max(...Object.values(cls));
+    dapHtml = `<fieldset class="card"><legend>Classes de DAP (cm)</legend><div class="bars">` + keys.map(k =>
+      `<div class="bar"><span>${k}–${k + 10}</span><i style="background:var(--forest);width:${cls[k] / max * 100}%"></i><span>${cls[k]} (${Math.round(cls[k] / daps.length * 100)}%)</span></div>`).join('') + `</div></fieldset>`;
+  }
+
+  $('statsBody').innerHTML = `
+    <div class="kpis">
+      <div class="kpi"><b>${records.length}</b><small>árvores</small></div>
+      <div class="kpi"><b>${pares.length}</b><small>pares completos</small></div>
+      <div class="kpi"><b>${pct}%</b><small>concordância</small></div>
+    </div>
+    <fieldset class="card"><legend>Matriz de contingência</legend>
+      <p class="hint" style="margin-top:0">Diagonal destacada = mesma classe nos dois métodos.</p>${table}</fieldset>
+    <fieldset class="card"><legend>Teste dos Sinais</legend>
+      <div class="kpis" style="margin:0">
+        <div class="kpi"><b>${sub}</b><small>▲ município subestima</small></div>
+        <div class="kpi"><b>${conc}</b><small>= empates</small></div>
+        <div class="kpi"><b>${sup}</b><small>▼ município superestima</small></div>
+      </div>
+      <p class="note">${verdict}<br><small>Bilateral exato; empates excluídos (Siegel e Castellan Jr., 2006). Com poucas árvores, trate como prévia.</small></p>
+    </fieldset>
+    <fieldset class="card"><legend>Distribuição por classe</legend>
+      ${bars('Município', L.nivelMun, [1,2,3,4].map(k => rows.filter(x => x.c.munCode === k).length))}
+      ${bars('TRAQ', L.categoria, [1,2,3,4].map(k => rows.filter(x => x.c.traqCode === k).length))}
+    </fieldset>
+    ${dapHtml}`;
+}
+
+/* =============================================================================
+   10. NAVEGAÇÃO, SUGESTÕES, TOAST
+   ========================================================================== */
+function showTab(t){
+  document.querySelectorAll('.tab').forEach(s => s.classList.toggle('active', s.id === 'tab-' + t));
+  document.querySelectorAll('.nav button').forEach(b => b.setAttribute('aria-selected', b.dataset.tab === t));
+  $('resultBar').hidden = t !== 'coleta';
+  document.body.classList.toggle('no-bar', t !== 'coleta');
+  if (t === 'inv') renderInv();
+  if (t === 'stats') renderStats();
+  window.scrollTo({ top: 0 });
+}
+document.querySelectorAll('.nav button').forEach(b => b.addEventListener('click', () => showTab(b.dataset.tab)));
+
+function refreshMeta(){
+  $('hdrCount').textContent = `${records.length} ${records.length === 1 ? 'árvore' : 'árvores'}`;
+  const esp = new Set([...ESPECIES, ...records.map(r => r.especie).filter(Boolean)]);
+  $('dlEspecies').innerHTML = [...esp].sort((a, b) => a.localeCompare(b, 'pt-BR')).map(s => `<option value="${esc(s)}">`).join('');
+  const loc = new Set(records.map(r => r.local).filter(Boolean));
+  $('dlLocais').innerHTML = [...loc].map(s => `<option value="${esc(s)}">`).join('');
+}
+
+let toastTimer;
+function toast(msg, err = false){
+  const t = $('toast'); t.textContent = msg; t.className = 'show' + (err ? ' err' : '');
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.className = '', err ? 5000 : 2800);
+}
+
+/* =============================================================================
+   11. PWA — manifesto gerado em tempo de execução + service worker opcional
+   ========================================================================== */
+(function setupPwa(){
+  // Ícone PNG desenhado em canvas (Android exige PNG para instalar)
+  const cv = document.createElement('canvas'); cv.width = cv.height = 512;
+  const g = cv.getContext('2d');
+  g.fillStyle = '#1D4D2E'; g.fillRect(0, 0, 512, 512);
+  g.fillStyle = '#FFFFFF'; g.beginPath(); g.arc(256, 200, 130, 0, Math.PI * 2); g.fill();
+  g.fillRect(232, 290, 48, 150);
+  g.fillStyle = '#FFD400'; g.fillRect(96, 430, 320, 36);
+  const icon = cv.toDataURL('image/png');
+  const manifest = {
+    name: 'Risco Arbóreo — Município × TRAQ', short_name: 'Risco Arbóreo',
+    start_url: location.href.split('#')[0], scope: location.href.replace(/[^/]*$/, ''),
+    display: 'standalone', orientation: 'portrait', background_color: '#E9EFEA', theme_color: '#1D4D2E',
+    icons: [{ src: icon, sizes: '512x512', type: 'image/png', purpose: 'any maskable' }],
+  };
+  const link = document.createElement('link'); link.rel = 'manifest';
+  // Blob URL herda a origem da página, o que mantém start_url válido
+  link.href = URL.createObjectURL(new Blob([JSON.stringify(manifest)], { type: 'application/manifest+json' }));
+  document.head.appendChild(link);
+  const apple = document.createElement('link'); apple.rel = 'apple-touch-icon'; apple.href = icon;
+  document.head.appendChild(apple);
+  // Se o app estiver hospedado (https) junto com sw.js, ativa o cache offline
+  if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
+  // Pede ao navegador que não apague os dados em caso de pouco espaço
+  if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+})();
+
+/* =============================================================================
+   12. INICIALIZAÇÃO — restaura rascunho, se houver
+   ========================================================================== */
+refreshMeta();
+const draft = readLS(KEY.draft, null);
+if (draft && draft.rec) {
+  writeForm(draft.rec); editingUid = draft.editingUid || null; alvoAuto = !draft.rec.traqAlvo;
+  if (editingUid) { $('editBar').hidden = false; $('editLabel').textContent = draft.rec.id; }
+  updateLive(); toast('Rascunho restaurado.');
+} else newForm();
+</script>
+</body>
+</html>
